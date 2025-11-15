@@ -5,4 +5,5 @@ def check (data):
         print(f"你的体温是{data}，你的体温正常")
 import random
 tem=random.randint(36,40)
+
 check (tem)
