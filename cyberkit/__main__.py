@@ -15,15 +15,20 @@ import sys
 from . import __version__
 
 DISPATCH: dict[str, tuple[str, str]] = {
-    "portscan":   ("cyberkit.portscan",   "Concurrent TCP connect scanner with banner grab"),
-    "hashid":     ("cyberkit.hashid",     "Identify hash type from length/charset/structure"),
-    "hashcrack":  ("cyberkit.hashcrack",  "Wordlist crack of md5/sha1/sha256/sha512/ntlm"),
-    "pwdaudit":   ("cyberkit.pwdaudit",   "Password strength + HIBP k-anonymity breach lookup"),
-    "httpprobe":  ("cyberkit.httpprobe",  "HTTP fingerprinting & tech detection"),
-    "jwtinspect": ("cyberkit.jwtinspect", "Decode JWTs; flag alg=none; brute HS256 secrets"),
-    "xorcrack":   ("cyberkit.xorcrack",   "XOR encrypt/decrypt; single-byte and repeating-key recovery"),
-    "entropy":    ("cyberkit.entropy",    "Shannon entropy of a file with windowed analysis"),
-    "hexview":    ("cyberkit.hexview",    "Hex+ASCII dump with offset/length controls"),
+    "portscan":    ("cyberkit.portscan",    "Concurrent TCP connect scanner with banner grab"),
+    "dnsenum":     ("cyberkit.dnsenum",     "DNS recon: record dump, AXFR, subdomain brute"),
+    "dirfuzz":     ("cyberkit.dirfuzz",     "HTTP content discovery with 404 fingerprinting"),
+    "httpprobe":   ("cyberkit.httpprobe",   "HTTP fingerprinting & tech detection"),
+    "certinspect": ("cyberkit.certinspect", "TLS certificate inspection & expiry / hostname checks"),
+    "hashid":      ("cyberkit.hashid",      "Identify hash type from length/charset/structure"),
+    "hashcrack":   ("cyberkit.hashcrack",   "Wordlist crack of md5/sha1/sha256/sha512/ntlm (+--rules)"),
+    "pwdaudit":    ("cyberkit.pwdaudit",    "Password strength + HIBP k-anonymity breach lookup"),
+    "jwtinspect":  ("cyberkit.jwtinspect",  "Decode JWTs; flag alg=none; brute HS256 secrets"),
+    "xorcrack":    ("cyberkit.xorcrack",    "XOR encrypt/decrypt; single-byte and repeating-key recovery"),
+    "baseconv":    ("cyberkit.baseconv",    "Encode / decode / auto-detect base16/32/58/64/85/url/rot"),
+    "secrets":     ("cyberkit.secrets",     "Scan files/dirs for hardcoded credentials and tokens"),
+    "entropy":     ("cyberkit.entropy",     "Shannon entropy of a file with windowed analysis"),
+    "hexview":     ("cyberkit.hexview",     "Hex+ASCII dump with offset/length controls"),
 }
 
 

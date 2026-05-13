@@ -1,23 +1,28 @@
 # CyberKit
 
-A small, **pure-stdlib** offensive-security toolkit. Nine focused tools
+A **pure-stdlib** offensive-security toolkit. Fourteen focused tools
 behind one dispatcher, no third-party dependencies, machine-readable
 `--json` output everywhere it makes sense.
 
 ```
 $ python -m cyberkit -h
-cyberkit  —  pure-stdlib offensive-security toolkit  (v0.2.0)
+cyberkit  —  pure-stdlib offensive-security toolkit  (v0.3.0)
 
 subcommands:
-  portscan    Concurrent TCP connect scanner with banner grab
-  hashid      Identify hash type from length/charset/structure
-  hashcrack   Wordlist crack of md5/sha1/sha256/sha512/ntlm
-  pwdaudit    Password strength + HIBP k-anonymity breach lookup
-  httpprobe   HTTP fingerprinting & tech detection
-  jwtinspect  Decode JWTs; flag alg=none; brute HS256 secrets
-  xorcrack    XOR encrypt/decrypt; single-byte and repeating-key recovery
-  entropy     Shannon entropy of a file with windowed analysis
-  hexview     Hex+ASCII dump with offset/length controls
+  portscan     Concurrent TCP connect scanner with banner grab
+  dnsenum      DNS recon: record dump, AXFR, subdomain brute
+  dirfuzz      HTTP content discovery with 404 fingerprinting
+  httpprobe    HTTP fingerprinting & tech detection
+  certinspect  TLS certificate inspection & expiry / hostname checks
+  hashid       Identify hash type from length/charset/structure
+  hashcrack    Wordlist crack of md5/sha1/sha256/sha512/ntlm (+--rules)
+  pwdaudit     Password strength + HIBP k-anonymity breach lookup
+  jwtinspect   Decode JWTs; flag alg=none; brute HS256 secrets
+  xorcrack     XOR encrypt/decrypt; single-byte and repeating-key recovery
+  baseconv     Encode / decode / auto-detect base16/32/58/64/85/url/rot
+  secrets      Scan files/dirs for hardcoded credentials and tokens
+  entropy      Shannon entropy of a file with windowed analysis
+  hexview      Hex+ASCII dump with offset/length controls
 ```
 
 Requirements: Python ≥ 3.9. Nothing to `pip install`.
@@ -40,6 +45,45 @@ python -m cyberkit portscan scanme.nmap.org -p top100 -w 200 -t 1.0
 python -m cyberkit portscan 10.0.0.5 -p 1-65535 --json | jq .
 ```
 
+### `dnsenum` — DNS reconnaissance
+
+Built on a pure-stdlib RFC 1035 resolver (UDP queries + TCP AXFR; full
+name-compression support and bounded recursion). Dumps A / AAAA / NS /
+MX / TXT / SOA / CNAME by default, optionally attempts AXFR against
+each authoritative NS, and runs concurrent wordlist subdomain enum with
+wildcard-DNS detection so wildcard zones don't poison results.
+
+```bash
+python -m cyberkit dnsenum example.com
+python -m cyberkit dnsenum example.com --axfr --brute cyberkit/data/dirs-small.txt
+python -m cyberkit dnsenum example.com --types A,AAAA,MX -s 8.8.8.8 --json
+```
+
+### `dirfuzz` — HTTP content discovery
+
+Concurrent wordlist content fuzzer with **smart 404 fingerprinting**:
+two random made-up probes calibrate the not-found shape (status + body
+length + title), and matching responses are filtered out. Defeats the
+common soft-404 problem where apps return 200 OK on missing paths.
+
+```bash
+python -m cyberkit dirfuzz https://target.example.com
+python -m cyberkit dirfuzz https://target.example.com -w bigwordlist.txt -T 64
+```
+
+### `certinspect` — TLS certificate inspection
+
+TLS handshake to a `host:port`, parses the leaf cert (even when invalid
+or self-signed — uses `_ssl._test_decode_cert` on the raw DER so we can
+inspect expired / mismatched / self-signed certs). Reports protocol,
+cipher, subject, issuer, SANs, validity window, days-to-expiry (with
+HIGH/CRITICAL gates), self-signed flag, and hostname-match check.
+
+```bash
+python -m cyberkit certinspect example.com
+python -m cyberkit certinspect mail.example.com:993 --sni mail.example.com --json
+```
+
 ### `hashid` — identify a hash
 
 Identifies algorithms by length + charset + structural prefixes (`$2b$`,
@@ -50,16 +94,20 @@ python -m cyberkit hashid 5d41402abc4b2a76b9719d911017c592
 python -m cyberkit hashid '$2b$12$Eix...' --json
 ```
 
-### `hashcrack` — wordlist hash recovery
+### `hashcrack` — wordlist hash recovery + rule engine
 
 Cracks unsalted (or simply-salted, prepend/append) hashes against a
 wordlist. Supports `md5`, `sha1`, `sha224`, `sha256`, `sha384`, `sha512`,
-and `ntlm`. NTLM uses a bundled pure-Python MD4 because modern OpenSSL
-removes the legacy provider.
+and `ntlm` (NTLM uses a bundled pure-Python MD4 because modern OpenSSL
+removes the legacy provider). With `--rules`, each wordlist entry is
+expanded with common hashcat-style mutations: case toggles, digit /
+year / symbol suffixes, leet substitutions, reversed forms — so a 100-
+entry list yields thousands of candidates.
 
 ```bash
 python -m cyberkit hashcrack 8846f7eaee8fb117ad06bdd830b7586c \
                               -a ntlm -w cyberkit/data/passwords-small.txt
+python -m cyberkit hashcrack <md5hex> -a md5 --rules -w cyberkit/data/passwords-small.txt
 echo -e "alice\nbob\ncharlie" | python -m cyberkit hashcrack <md5hex> -a md5
 ```
 
@@ -80,12 +128,18 @@ python -m cyberkit pwdaudit --offline --json "letmein"
 ### `httpprobe` — HTTP fingerprinting
 
 For each URL: status, server, page title, content-type, technology
-fingerprint (signature ruleset across headers/body — nginx, Apache,
-Cloudflare, PHP, Laravel, WordPress, Drupal, Next.js, …), and a list of
-**missing security headers** (`HSTS`, CSP, `X-Frame-Options`, …).
+fingerprint (40+ signature rules across headers and body — nginx,
+Apache, Caddy, IIS, LiteSpeed, Kestrel, gunicorn, uvicorn, Flask,
+Cloudflare, CloudFront, Vercel, Netlify, Render, Varnish, PHP, Laravel,
+ASP.NET (MVC), Express, Django, Java/JSP, WordPress, Drupal, Joomla,
+Next.js, Nuxt, React, Vue, Angular, Svelte, jQuery, GraphQL, Magento,
+Shopify, Ghost), and a list of **missing security headers** (HSTS, CSP,
+`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`,
+`Permissions-Policy`). If you omit the scheme, HTTPS is tried first
+with HTTP fallback.
 
 ```bash
-python -m cyberkit httpprobe https://example.com https://github.com
+python -m cyberkit httpprobe example.com github.com         # HTTPS-first
 cat urls.txt | python -m cyberkit httpprobe --json -w 32
 ```
 
@@ -118,6 +172,37 @@ python -m cyberkit xorcrack brute-single -i ct.bin
 python -m cyberkit xorcrack brute-repeating -i ct.bin --kmax 40
 ```
 
+### `baseconv` — multi-encoding swiss army knife
+
+Encode / decode base16, base32, base58 (Bitcoin alphabet), base64,
+base64url, base85, URL, HTML entities, and ROT-N. The `auto` mode tries
+every decoder + every rot shift and ranks the candidates by how
+English-like the result looks, so multi-layer CTF chains unpeel
+themselves.
+
+```bash
+python -m cyberkit baseconv encode base64 -i "hello world"
+echo "VGhlIHF1aWNrIGJyb3duIGZveCBqdW1wcyBvdmVyIHRoZSBsYXp5IGRvZw==" \
+    | python -m cyberkit baseconv auto
+echo "gur dhvpx oebja sbk" | python -m cyberkit baseconv auto       # rot13 wins
+```
+
+### `secrets` — hardcoded-credential scanner
+
+Walks a directory tree and runs a curated rule table against every text
+file. Rules cover AWS, GCP, GitHub PAT/OAuth/App/Fine-grained, Slack
+tokens & webhooks, Stripe live / restricted, Google API & OAuth, Heroku,
+Twilio, SendGrid, Mailgun, npm, OpenAI, JWTs, PEM private-key blocks,
+context-aware generic API keys (with min-entropy gating to suppress
+false positives), password assignments, URLs with embedded credentials.
+Skips `.git`, `node_modules`, `__pycache__`, virtualenvs, build/dist,
+common binary formats. Matches are redacted by default.
+
+```bash
+python -m cyberkit secrets .
+python -m cyberkit secrets ./src --no-redact --min-severity HIGH --json
+```
+
 ### `entropy` — Shannon entropy with windowed view
 
 Global entropy + a per-window series rendered as an ASCII spark-line so
@@ -145,23 +230,29 @@ python -m cyberkit hexview /bin/ls -o 0x1000 -n 64
 ```
 cyberkit/
   __init__.py
-  __main__.py        # dispatcher
+  __main__.py        # dispatcher (14 subcommands)
   _common.py         # shared output helpers
-  _md4.py            # pure-Python MD4 (for NTLM; verified against RFC 1320)
+  _md4.py            # pure-Python MD4 (NTLM; verified against RFC 1320)
+  _dns.py            # pure-stdlib DNS-over-UDP resolver + TCP AXFR
   portscan.py
+  dnsenum.py
+  dirfuzz.py
+  httpprobe.py
+  certinspect.py
   hashid.py
   hashcrack.py
   pwdaudit.py
-  httpprobe.py
   jwtinspect.py
   xorcrack.py
+  baseconv.py
+  secrets.py
   entropy.py
   hexview.py
   data/
     passwords-small.txt
     dirs-small.txt
 tests/
-  test_*.py          # 52 unit tests; run with `python -m unittest`
+  test_*.py          # 99 unit tests; run with `python -m unittest`
 ```
 
 ## Running the test suite
@@ -170,12 +261,13 @@ tests/
 python -m unittest discover -s tests -v
 ```
 
-Covers: hash identification, hash cracking (md5/sha1/sha256/sha512/ntlm,
-prepend/append salt), password strength heuristics, JWT decode +
-verify + brute + `alg=none` audit, XOR self-inverse, single-byte +
-repeating-key recovery, Hamming-distance keysize estimation, entropy
-sanity properties (constant=0, two-valued=1, urandom≈8), hexview layout,
-port-spec parsing, and a live in-process port scan.
+Covers, in addition to the original tools: DNS name encoding/decoding
+with compression-pointer loops, A/AAAA/MX/TXT/NXDOMAIN/truncated-packet
+parsing; hashcrack mutation engine (case, suffix, leet, reverse) +
+rule-driven cracking; secret scanner regex + entropy + redaction; base16/
+32/58/64/85 round-trips, base58 leading-zero handling, rot13 involution,
+base64 and rot13 auto-detection; dirfuzz 404 fingerprint calibration and
+hit filtering against a real in-process server.
 
 ## Conventions
 
