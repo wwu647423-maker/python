@@ -20,6 +20,49 @@ from ._common import bold, cyan, dim, emit_json, green, red, yellow
 
 SPARK = "▁▂▃▄▅▆▇█"
 
+MAGIC: list[tuple[bytes, str]] = [
+    (b"\x7fELF",             "ELF executable"),
+    (b"MZ",                  "DOS/PE executable (Windows .exe/.dll)"),
+    (b"\xca\xfe\xba\xbe",    "Mach-O fat binary or Java class file"),
+    (b"\xcf\xfa\xed\xfe",    "Mach-O 64-bit (little-endian)"),
+    (b"\xfe\xed\xfa\xce",    "Mach-O 32-bit (big-endian)"),
+    (b"PK\x03\x04",          "ZIP archive (jar/apk/odf/docx/xlsx/...)"),
+    (b"PK\x05\x06",          "ZIP archive (empty)"),
+    (b"\x1f\x8b\x08",         "gzip-compressed data"),
+    (b"BZh",                 "bzip2 archive"),
+    (b"\xfd7zXZ\x00",        "xz archive"),
+    (b"7z\xbc\xaf\x27\x1c",  "7z archive"),
+    (b"Rar!\x1a\x07",        "RAR archive"),
+    (b"\x89PNG\r\n\x1a\n",   "PNG image"),
+    (b"\xff\xd8\xff",         "JPEG image"),
+    (b"GIF87a",               "GIF87a image"),
+    (b"GIF89a",               "GIF89a image"),
+    (b"%PDF-",                "PDF document"),
+    (b"OggS",                 "Ogg container"),
+    (b"ID3",                  "MP3 (ID3)"),
+    (b"RIFF",                 "RIFF container (WAV/AVI/WEBP)"),
+    (b"\x00\x00\x01\xba",     "MPEG program stream"),
+    (b"SQLite format 3\x00", "SQLite database"),
+    (b"BMP",                  "BMP image (rare)"),
+    (b"BM",                   "BMP image"),
+    (b"-----BEGIN ",          "PEM-encoded artifact (cert / key / CSR)"),
+    (b"{\\rtf",               "RTF document"),
+    (b"<?xml",                "XML"),
+    (b"<!DOCTYPE",            "HTML / DTD"),
+    (b"<html",                "HTML"),
+    (b"#!",                   "shebang script"),
+]
+
+
+def detect_magic(data: bytes) -> str:
+    head = data[:64]
+    for sig, label in MAGIC:
+        if head.startswith(sig):
+            return label
+    if head and all(0x20 <= b < 0x7f or b in (9, 10, 13) for b in head):
+        return "ASCII / UTF-8 text (no magic match)"
+    return "unknown / no magic match"
+
 
 def shannon_entropy(data: bytes) -> float:
     if not data:
@@ -85,6 +128,7 @@ def main(argv: list[str]) -> int:
 
     global_h = shannon_entropy(data)
     win_h = windowed_entropy(data, args.window)
+    magic = detect_magic(data)
 
     if args.json:
         emit_json({
@@ -94,6 +138,7 @@ def main(argv: list[str]) -> int:
             "window": args.window,
             "windows": [round(v, 4) for v in win_h],
             "classification": classify(global_h),
+            "magic": magic,
         })
         return 0
 
@@ -103,6 +148,7 @@ def main(argv: list[str]) -> int:
 
     print(f"{bold('file')}            {args.path}")
     print(f"{bold('size')}            {len(data):,} bytes")
+    print(f"{bold('magic')}           {cyan(magic)}")
     print(f"{bold('global entropy')}  {col(f'{global_h:.4f}')} bits/byte  "
           f"({col(classify(global_h))})")
     print(f"{bold('window')}          {args.window} bytes, {len(win_h)} windows")
