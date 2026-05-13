@@ -1,31 +1,37 @@
 # CyberKit
 
-A **pure-stdlib** offensive-security toolkit. Fourteen focused tools
+A **pure-stdlib** offensive-security toolkit. Twenty focused tools
 behind one dispatcher, no third-party dependencies, machine-readable
 `--json` output everywhere it makes sense.
 
 ```
 $ python -m cyberkit -h
-cyberkit  —  pure-stdlib offensive-security toolkit  (v0.3.0)
+cyberkit  —  pure-stdlib offensive-security toolkit  (v0.4.0)
 
 subcommands:
   portscan     Concurrent TCP connect scanner with banner grab
   dnsenum      DNS recon: record dump, AXFR, subdomain brute
+  mailcheck    Email auth posture: SPF / DMARC / DKIM / MX audit
+  subtake      Subdomain takeover detector (dangling CNAME -> SaaS)
   dirfuzz      HTTP content discovery with 404 fingerprinting
   httpprobe    HTTP fingerprinting & tech detection
+  cspaudit     Audit a Content-Security-Policy header
   certinspect  TLS certificate inspection & expiry / hostname checks
   hashid       Identify hash type from length/charset/structure
   hashcrack    Wordlist crack of md5/sha1/sha256/sha512/ntlm (+--rules)
-  pwdaudit     Password strength + HIBP k-anonymity breach lookup
-  jwtinspect   Decode JWTs; flag alg=none; brute HS256 secrets
+  pwdaudit     Password strength + HIBP + bundled common-password check
+  passwordgen  Generate strong passwords / diceware passphrases / PINs
+  otp          TOTP / HOTP generate, verify, otpauth:// parse
+  jwtinspect   Decode + audit JWTs (alg=none, kid/jku injection, brute)
   xorcrack     XOR encrypt/decrypt; single-byte and repeating-key recovery
   baseconv     Encode / decode / auto-detect base16/32/58/64/85/url/rot
   secrets      Scan files/dirs for hardcoded credentials and tokens
-  entropy      Shannon entropy of a file with windowed analysis
+  packetparse  Decode hex packet captures (Ethernet/IPv4/IPv6/TCP/UDP/DNS)
+  entropy      Shannon entropy + magic-byte file-type detection
   hexview      Hex+ASCII dump with offset/length controls
 ```
 
-Requirements: Python ≥ 3.9. Nothing to `pip install`.
+Requirements: Python ≥ 3.9. Nothing to `pip install`. **175 unit tests**.
 
 > ⚠️ For authorized testing, CTFs, and your own infrastructure only.
 
@@ -47,16 +53,48 @@ python -m cyberkit portscan 10.0.0.5 -p 1-65535 --json | jq .
 
 ### `dnsenum` — DNS reconnaissance
 
-Built on a pure-stdlib RFC 1035 resolver (UDP queries + TCP AXFR; full
-name-compression support and bounded recursion). Dumps A / AAAA / NS /
-MX / TXT / SOA / CNAME by default, optionally attempts AXFR against
-each authoritative NS, and runs concurrent wordlist subdomain enum with
-wildcard-DNS detection so wildcard zones don't poison results.
+Built on a pure-stdlib RFC 1035 resolver (UDP queries with **automatic
+TCP fallback on truncation**, plus TCP AXFR; full name-compression
+support and bounded recursion). Dumps A / AAAA / NS / MX / TXT / SOA /
+CNAME by default, optionally attempts AXFR against each authoritative
+NS, and runs concurrent wordlist subdomain enum with wildcard-DNS
+detection so wildcard zones don't poison results.
 
 ```bash
 python -m cyberkit dnsenum example.com
 python -m cyberkit dnsenum example.com --axfr --brute cyberkit/data/dirs-small.txt
 python -m cyberkit dnsenum example.com --types A,AAAA,MX -s 8.8.8.8 --json
+```
+
+### `mailcheck` — email authentication audit
+
+Pulls TXT records via the stdlib resolver and audits the domain's email
+auth posture:
+
+* **SPF**: missing, `+all` (CRITICAL — anyone can spoof), `~all` vs `-all`,
+  duplicate records (RFC 7208 violation), > 10 DNS-lookup mechanisms
+* **DMARC**: missing `_dmarc.<domain>`, weak `p=none`, `pct<100`, missing
+  `rua=` aggregate-report endpoint, `sp=none`, relaxed alignment
+* **DKIM**: per-selector key inspection (`p=`, `k=`, key length, revoked)
+* **MX**: at least one MX with a reachable A record
+
+```bash
+python -m cyberkit mailcheck example.com
+python -m cyberkit mailcheck example.com --selector default --selector google
+```
+
+### `subtake` — subdomain takeover detector
+
+For each subdomain: trace the CNAME chain via our DNS resolver; if it
+ends at a known SaaS host (GitHub Pages, Heroku, S3, CloudFront, Azure
+CloudApp, Shopify, Fastly, Tumblr, Unbounce, Webflow, Pantheon, Surge,
+Bitbucket, Read the Docs, …), HTTP-probe the resource and look for that
+service's canonical orphan fingerprint. Flags `VULNERABLE` /
+`potential` / `cname-not-service` / `no-cname`.
+
+```bash
+echo old.example.com | python -m cyberkit subtake
+python -m cyberkit subtake sub1.target.com sub2.target.com --json
 ```
 
 ### `dirfuzz` — HTTP content discovery
@@ -69,6 +107,21 @@ common soft-404 problem where apps return 200 OK on missing paths.
 ```bash
 python -m cyberkit dirfuzz https://target.example.com
 python -m cyberkit dirfuzz https://target.example.com -w bigwordlist.txt -T 64
+```
+
+### `cspaudit` — Content-Security-Policy auditor
+
+Parses a CSP value into directives and flags unsafe constructs:
+`unsafe-inline`, `unsafe-eval`, `unsafe-hashes`, wildcard `*`, bare
+`http:`, `data:`/`blob:` in script/object directives, plus missing
+critical directives (`script-src` / `object-src` / `base-uri` /
+`frame-ancestors`) — escalated to HIGH only when there's no
+`default-src` fallback. Source can be `--policy "..."`, `--url`, or
+stdin.
+
+```bash
+python -m cyberkit cspaudit --url https://example.com
+python -m cyberkit cspaudit --policy "default-src 'self'; script-src * 'unsafe-inline'"
 ```
 
 ### `certinspect` — TLS certificate inspection
@@ -109,6 +162,36 @@ python -m cyberkit hashcrack 8846f7eaee8fb117ad06bdd830b7586c \
                               -a ntlm -w cyberkit/data/passwords-small.txt
 python -m cyberkit hashcrack <md5hex> -a md5 --rules -w cyberkit/data/passwords-small.txt
 echo -e "alice\nbob\ncharlie" | python -m cyberkit hashcrack <md5hex> -a md5
+```
+
+### `passwordgen` — strong password / passphrase generator
+
+CSPRNG-backed (`secrets.choice` / `secrets.randbelow`). Three modes:
+
+* `rand` — random N-char password, guaranteed to contain at least one
+  char from every selected class (lower/upper/digit/symbol) but with
+  randomized positions so the result is still uniform. `--no-ambiguous`
+  excludes visually-confusable chars (I l 1 O 0 …).
+* `pass` — diceware-style passphrase from a built-in 250-word EFF-style
+  list (or bring your own with `--wordlist`). Reports word-count entropy.
+* `pin` — N-digit numeric PIN.
+
+```bash
+python -m cyberkit passwordgen rand -n 24 --no-ambiguous -c 5
+python -m cyberkit passwordgen pass -w 6 --capitalize --add-digit
+```
+
+### `otp` — TOTP / HOTP
+
+RFC 4226 (HOTP) + RFC 6238 (TOTP). Reads base32 secrets or full
+`otpauth://...` URIs; supports SHA-1/256/512, custom digit length and
+period, and verification with configurable time-skew window. Verified
+against every Appendix-D vector of RFC 4226 and Appendix-B of RFC 6238.
+
+```bash
+python -m cyberkit otp gen JBSWY3DPEHPK3PXP
+python -m cyberkit otp verify JBSWY3DPEHPK3PXP 123456 --window 2
+python -m cyberkit otp parse "otpauth://totp/Acme:alice?secret=...&issuer=Acme"
 ```
 
 ### `pwdaudit` — local audit + HIBP breach lookup
@@ -203,7 +286,19 @@ python -m cyberkit secrets .
 python -m cyberkit secrets ./src --no-redact --min-severity HIGH --json
 ```
 
-### `entropy` — Shannon entropy with windowed view
+### `packetparse` — hex packet decoder
+
+Decodes a hex string (raw, contiguous, or tcpdump `0x0000:` style) layer
+by layer: Ethernet II → IPv4 / IPv6 → TCP / UDP / ICMP, with DNS as the
+upper layer when the UDP src/dst port is 53. Defensive parsers — each
+layer returns what it could decode even if higher layers are malformed.
+
+```bash
+python -m cyberkit packetparse --hex "aabbccddeeff112233445566 0800 4500003c..."
+tcpdump -nn -x port 53 | python -m cyberkit packetparse --file -
+```
+
+### `entropy` — Shannon entropy with windowed view + magic-byte ID
 
 Global entropy + a per-window series rendered as an ASCII spark-line so
 you can see at a glance whether a file is text, executable, compressed,
@@ -230,29 +325,36 @@ python -m cyberkit hexview /bin/ls -o 0x1000 -n 64
 ```
 cyberkit/
   __init__.py
-  __main__.py        # dispatcher (14 subcommands)
+  __main__.py        # dispatcher (20 subcommands)
   _common.py         # shared output helpers
   _md4.py            # pure-Python MD4 (NTLM; verified against RFC 1320)
-  _dns.py            # pure-stdlib DNS-over-UDP resolver + TCP AXFR
+  _dns.py            # pure-stdlib DNS resolver: UDP + TCP fallback on TC,
+                     # TCP AXFR, RFC 1035 compression with loop protection
   portscan.py
   dnsenum.py
+  mailcheck.py
+  subtake.py
   dirfuzz.py
   httpprobe.py
+  cspaudit.py
   certinspect.py
   hashid.py
   hashcrack.py
   pwdaudit.py
+  passwordgen.py
+  otp.py
   jwtinspect.py
   xorcrack.py
   baseconv.py
   secrets.py
+  packetparse.py
   entropy.py
   hexview.py
   data/
     passwords-small.txt
     dirs-small.txt
 tests/
-  test_*.py          # 99 unit tests; run with `python -m unittest`
+  test_*.py          # 175 unit tests; run with `python -m unittest`
 ```
 
 ## Running the test suite
