@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cyberkit"
+version = "0.5.0"
+description = "Pure-stdlib offensive-security toolkit: 25 tools — port scan, DNS recon (AXFR + brute + TXT TCP fallback), email auth audit (SPF/DMARC/DKIM), subdomain takeover, CIDR subnet calculator, WHOIS, web fuzz, HTTP fingerprint, CSP audit, TLS cert audit + version/cipher enumeration, hash ID & crack, ZipCrypto cracker, password audit, password generator, TOTP/HOTP, JWT audit, XOR cryptanalysis, base/rot decoder with auto-detect, secret scanner, packet decoder, PCAP reader, entropy + magic-byte, hex view."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "cyberkit" }]
+keywords = ["security", "pentest", "cryptanalysis", "ctf", "portscan", "jwt", "xor", "hibp"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Security",
+    "Topic :: Security :: Cryptography",
+]
+
+[project.scripts]
+cyberkit = "cyberkit.__main__:main"
+
+[project.urls]
+Repository = "https://github.com/wwu647423-maker/python"
+
+[tool.setuptools]
+packages = ["cyberkit"]
+
+[tool.setuptools.package-data]
+cyberkit = ["data/*.txt"]
