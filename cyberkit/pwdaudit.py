@@ -23,9 +23,27 @@ import string
 import sys
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import NamedTuple
 
 from ._common import bold, cyan, dim, emit_json, green, red, yellow
+
+
+_BUNDLED_LIST_CACHE: set[str] | None = None
+
+
+def _bundled_passwords() -> set[str]:
+    """Load the bundled common-password list lazily."""
+    global _BUNDLED_LIST_CACHE
+    if _BUNDLED_LIST_CACHE is not None:
+        return _BUNDLED_LIST_CACHE
+    path = Path(__file__).resolve().parent / "data" / "passwords-small.txt"
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            _BUNDLED_LIST_CACHE = {ln.strip() for ln in fh if ln.strip()}
+    except OSError:
+        _BUNDLED_LIST_CACHE = set()
+    return _BUNDLED_LIST_CACHE
 
 COMMON_BASES = {
     "password", "qwerty", "admin", "letmein", "welcome", "monkey",
@@ -43,6 +61,7 @@ class Result(NamedTuple):
     score: int                   # 0..4 (zxcvbn-style)
     findings: list[str]
     hibp_pwned_count: int | None
+    in_common_list: bool
 
 
 def _pool_size(pw: str) -> int:
@@ -95,6 +114,9 @@ def _common_base(pw: str) -> str | None:
 
 def audit_local(pw: str) -> Result:
     findings: list[str] = []
+    in_common = pw in _bundled_passwords() or pw.lower() in _bundled_passwords()
+    if in_common:
+        findings.append("EXACT match in bundled common-password list — instantly cracked")
     if len(pw) < 8:
         findings.append("very short (< 8 chars)")
     elif len(pw) < 12:
@@ -135,6 +157,8 @@ def audit_local(pw: str) -> Result:
     elif estimated < 60: score = 2
     elif estimated < 80: score = 3
     else:                score = 4
+    if in_common:
+        score = 0
 
     return Result(
         length=len(pw),
@@ -144,6 +168,7 @@ def audit_local(pw: str) -> Result:
         score=score,
         findings=findings,
         hibp_pwned_count=None,
+        in_common_list=in_common,
     )
 
 
