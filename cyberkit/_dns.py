@@ -155,7 +155,7 @@ def parse_response(data: bytes) -> tuple[int, list[Record]]:
     """Parse a DNS reply packet. Returns (rcode, all records from AN+NS+AR)."""
     if len(data) < 12:
         raise DnsError("response shorter than 12 bytes")
-    qid, flags, qd, an, ns, ar = struct.unpack(">HHHHHH", data[:12])
+    _qid, flags, qd, an, ns, ar = struct.unpack(">HHHHHH", data[:12])
     rcode = flags & 0xF
     offset = 12
 
@@ -185,9 +185,28 @@ def parse_response(data: bytes) -> tuple[int, list[Record]]:
     return rcode, records
 
 
+def _query_tcp(name: str, qtype: int, server: str, timeout: float) -> bytes:
+    """Send a DNS query over TCP/53 (used as fallback when UDP is truncated)."""
+    pkt = build_query(name, qtype)
+    framed = struct.pack(">H", len(pkt)) + pkt
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        sock.connect((server, 53))
+        sock.sendall(framed)
+        hdr = _recv_exact(sock, 2)
+        if len(hdr) < 2:
+            raise DnsError("TCP DNS reply truncated before length header")
+        mlen = struct.unpack(">H", hdr)[0]
+        body = _recv_exact(sock, mlen)
+        if len(body) < mlen:
+            raise DnsError("TCP DNS reply truncated mid-message")
+        return body
+
+
 def query(name: str, qtype: int | str, server: str = "8.8.8.8",
           timeout: float = 3.0) -> list[Record]:
-    """Send a recursive UDP DNS query. Raises DnsError on RCODE != 0."""
+    """Send a recursive DNS query. Falls back to TCP automatically when the
+    UDP answer has the TC (truncation) bit set, per RFC 1035 §4.2.1."""
     if isinstance(qtype, str):
         qtype = TYPE_BY_NAME[qtype.upper()]
     pkt = build_query(name, qtype)
@@ -198,6 +217,12 @@ def query(name: str, qtype: int | str, server: str = "8.8.8.8",
             data, _ = sock.recvfrom(4096)
         except socket.timeout as e:
             raise DnsError(f"timeout querying {server}") from e
+
+    if len(data) >= 12:
+        flags = struct.unpack(">H", data[2:4])[0]
+        if flags & 0x0200:
+            data = _query_tcp(name, qtype, server, timeout)
+
     rcode, records = parse_response(data)
     if rcode == 3:
         return []
