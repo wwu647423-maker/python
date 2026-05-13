@@ -1,24 +1,28 @@
 # CyberKit
 
-A **pure-stdlib** offensive-security toolkit. Twenty focused tools
+A **pure-stdlib** offensive-security toolkit. Twenty-five focused tools
 behind one dispatcher, no third-party dependencies, machine-readable
 `--json` output everywhere it makes sense.
 
 ```
 $ python -m cyberkit -h
-cyberkit  —  pure-stdlib offensive-security toolkit  (v0.4.0)
+cyberkit  —  pure-stdlib offensive-security toolkit  (v0.5.0)
 
 subcommands:
   portscan     Concurrent TCP connect scanner with banner grab
   dnsenum      DNS recon: record dump, AXFR, subdomain brute
   mailcheck    Email auth posture: SPF / DMARC / DKIM / MX audit
   subtake      Subdomain takeover detector (dangling CNAME -> SaaS)
+  cidr         IPv4 / IPv6 subnet calculator (info/contains/summarize/split)
+  whois        WHOIS client (TCP/43) with IANA referral chasing
   dirfuzz      HTTP content discovery with 404 fingerprinting
   httpprobe    HTTP fingerprinting & tech detection
   cspaudit     Audit a Content-Security-Policy header
   certinspect  TLS certificate inspection & expiry / hostname checks
+  tlsenum      Enumerate supported TLS versions, ciphers, and features
   hashid       Identify hash type from length/charset/structure
   hashcrack    Wordlist crack of md5/sha1/sha256/sha512/ntlm (+--rules)
+  crackzip     Crack ZipCrypto-encrypted .zip files (+--rules)
   pwdaudit     Password strength + HIBP + bundled common-password check
   passwordgen  Generate strong passwords / diceware passphrases / PINs
   otp          TOTP / HOTP generate, verify, otpauth:// parse
@@ -27,11 +31,12 @@ subcommands:
   baseconv     Encode / decode / auto-detect base16/32/58/64/85/url/rot
   secrets      Scan files/dirs for hardcoded credentials and tokens
   packetparse  Decode hex packet captures (Ethernet/IPv4/IPv6/TCP/UDP/DNS)
+  pcap         Read libpcap files; protocol histogram / top talkers / per-packet
   entropy      Shannon entropy + magic-byte file-type detection
   hexview      Hex+ASCII dump with offset/length controls
 ```
 
-Requirements: Python ≥ 3.9. Nothing to `pip install`. **175 unit tests**.
+Requirements: Python ≥ 3.9. Nothing to `pip install`. **206 unit tests**.
 
 > ⚠️ For authorized testing, CTFs, and your own infrastructure only.
 
@@ -97,6 +102,38 @@ echo old.example.com | python -m cyberkit subtake
 python -m cyberkit subtake sub1.target.com sub2.target.com --json
 ```
 
+### `cidr` — subnet calculator
+
+Backed by stdlib `ipaddress`. Subcommands:
+
+* `info`        — network / broadcast / first / last / count / flags
+* `contains`    — does CIDR include IP? (exit-code 0/1 for scripts)
+* `summarize`   — collapse a list of CIDRs/IPs into the minimal cover
+* `split`       — carve a CIDR into smaller /N subnets
+* `iter`        — list every address with a `--limit` safety guard
+
+Handles both IPv4 and IPv6 (including /64 — no enumeration; uses index
+arithmetic so a `cidr info 2001:db8::/64` returns instantly).
+
+```bash
+python -m cyberkit cidr info 10.0.0.0/24
+python -m cyberkit cidr summarize 10.0.0.0/25 10.0.0.128/25       # → 10.0.0.0/24
+python -m cyberkit cidr split 10.0.0.0/22 26
+```
+
+### `whois` — WHOIS lookup with referral chasing
+
+TCP/43 client. Starts at `whois.iana.org`, parses `refer:` / `whois:` /
+`ReferralServer:` / `Registrar WHOIS Server:` lines and follows them up
+to 4 hops. Speaks the VeriSign `=domain` syntax automatically for .com /
+.net referrals.
+
+```bash
+python -m cyberkit whois example.com
+python -m cyberkit whois 8.8.8.8
+python -m cyberkit whois example.io --json
+```
+
 ### `dirfuzz` — HTTP content discovery
 
 Concurrent wordlist content fuzzer with **smart 404 fingerprinting**:
@@ -135,6 +172,21 @@ HIGH/CRITICAL gates), self-signed flag, and hostname-match check.
 ```bash
 python -m cyberkit certinspect example.com
 python -m cyberkit certinspect mail.example.com:993 --sni mail.example.com --json
+```
+
+### `tlsenum` — enumerate TLS versions, ciphers, features
+
+For each candidate TLS version (1.0/1.1/1.2/1.3) we pin
+`minimum_version == maximum_version` on a fresh `SSLContext` and try a
+handshake. For ciphers we walk a curated list of weak + strong suites
+and see what the server is willing to negotiate. Reports flag legacy
+protocols (TLS<1.2) and weak ciphers (NULL / RC4 / EXPORT / DES /
+anonymous). Also probes session resumption by doing the handshake
+twice.
+
+```bash
+python -m cyberkit tlsenum example.com:443
+python -m cyberkit tlsenum mail.example.com:993 --sni mail.example.com --skip-ciphers
 ```
 
 ### `hashid` — identify a hash
@@ -192,6 +244,22 @@ against every Appendix-D vector of RFC 4226 and Appendix-B of RFC 6238.
 python -m cyberkit otp gen JBSWY3DPEHPK3PXP
 python -m cyberkit otp verify JBSWY3DPEHPK3PXP 123456 --window 2
 python -m cyberkit otp parse "otpauth://totp/Acme:alice?secret=...&issuer=Acme"
+```
+
+### `crackzip` — ZipCrypto password cracker
+
+Implements the ZipCrypto cipher (APPNOTE.TXT §6.1) directly: pre-feeds
+the password into the three 32-bit keystream registers, runs them
+through the 12-byte encryption header, and checks the last decrypted
+byte against the entry's "check byte" (high byte of CRC, or of mod-time
+for streaming entries). That's a tiny in-process test — 10⁵ candidates
+per second on a single core, and we parallelize. Only on a match do
+we actually decompress to verify (saves ~99.6% of the work). Supports
+`--rules` mutation engine. (AES-256 zips would need a separate
+implementation; stdlib `zipfile` can't decrypt them.)
+
+```bash
+python -m cyberkit crackzip secret.zip -w cyberkit/data/passwords-small.txt --rules
 ```
 
 ### `pwdaudit` — local audit + HIBP breach lookup
@@ -298,6 +366,20 @@ python -m cyberkit packetparse --hex "aabbccddeeff112233445566 0800 4500003c..."
 tcpdump -nn -x port 53 | python -m cyberkit packetparse --file -
 ```
 
+### `pcap` — read libpcap capture files
+
+Parses the classic libpcap savefile format from scratch (both byte
+orders, both µs/ns timestamp resolutions, link types Ethernet / RAW IP
+/ Null / Linux SLL). Each packet is decoded via `packetparse`, so you
+get the same L2-L7 breakdown plus protocol histogram, top talkers, and
+filtering by protocol / port.
+
+```bash
+python -m cyberkit pcap capture.pcap
+python -m cyberkit pcap capture.pcap --proto TCP --port 443
+python -m cyberkit pcap capture.pcap --json | jq .
+```
+
 ### `entropy` — Shannon entropy with windowed view + magic-byte ID
 
 Global entropy + a per-window series rendered as an ASCII spark-line so
@@ -325,7 +407,7 @@ python -m cyberkit hexview /bin/ls -o 0x1000 -n 64
 ```
 cyberkit/
   __init__.py
-  __main__.py        # dispatcher (20 subcommands)
+  __main__.py        # dispatcher (25 subcommands)
   _common.py         # shared output helpers
   _md4.py            # pure-Python MD4 (NTLM; verified against RFC 1320)
   _dns.py            # pure-stdlib DNS resolver: UDP + TCP fallback on TC,
@@ -334,12 +416,16 @@ cyberkit/
   dnsenum.py
   mailcheck.py
   subtake.py
+  cidr.py
+  whois.py
   dirfuzz.py
   httpprobe.py
   cspaudit.py
   certinspect.py
+  tlsenum.py
   hashid.py
   hashcrack.py
+  crackzip.py
   pwdaudit.py
   passwordgen.py
   otp.py
@@ -348,13 +434,14 @@ cyberkit/
   baseconv.py
   secrets.py
   packetparse.py
+  pcap.py
   entropy.py
   hexview.py
   data/
     passwords-small.txt
     dirs-small.txt
 tests/
-  test_*.py          # 175 unit tests; run with `python -m unittest`
+  test_*.py          # 206 unit tests; run with `python -m unittest`
 ```
 
 ## Running the test suite

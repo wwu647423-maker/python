@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cyberkit"
-version = "0.4.0"
-description = "Pure-stdlib offensive-security toolkit: 20 tools — port scan, DNS recon (AXFR + brute + TXT TCP fallback), email auth audit (SPF/DMARC/DKIM), subdomain takeover, web fuzz, HTTP fingerprint, CSP audit, TLS cert audit, hash ID & crack, password audit, password generator, TOTP/HOTP, JWT audit, XOR cryptanalysis, base/rot decoder with auto-detect, secret scanner, packet decoder, entropy + magic-byte, hex view."
+version = "0.5.0"
+description = "Pure-stdlib offensive-security toolkit: 25 tools — port scan, DNS recon (AXFR + brute + TXT TCP fallback), email auth audit (SPF/DMARC/DKIM), subdomain takeover, CIDR subnet calculator, WHOIS, web fuzz, HTTP fingerprint, CSP audit, TLS cert audit + version/cipher enumeration, hash ID & crack, ZipCrypto cracker, password audit, password generator, TOTP/HOTP, JWT audit, XOR cryptanalysis, base/rot decoder with auto-detect, secret scanner, packet decoder, PCAP reader, entropy + magic-byte, hex view."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
