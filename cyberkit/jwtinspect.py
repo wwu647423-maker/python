@@ -17,6 +17,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import sys
 import time
 from typing import NamedTuple
@@ -78,6 +79,11 @@ def brute_hmac(decoded: Decoded, words) -> str | None:
     return None
 
 
+_SQLI_HINTS = re.compile(r"(['\"]|--|/\*|\bUNION\b|\bSELECT\b|\bOR\s+1\b)", re.I)
+_PATH_TRAVERSAL = re.compile(r"\.\.[\\/]|/etc/|%2e%2e", re.I)
+_NULL_BYTE = re.compile(r"\x00|%00")
+
+
 def audit(decoded: Decoded) -> list[tuple[str, str]]:
     """Return list of (severity, message) findings."""
     findings: list[tuple[str, str]] = []
@@ -89,6 +95,32 @@ def audit(decoded: Decoded) -> list[tuple[str, str]]:
         findings.append(("HIGH", "header has no 'alg' field"))
     if alg in HS_ALGS and len(decoded.signature_b64) < 40:
         findings.append(("HIGH", "HMAC signature looks truncated"))
+
+    kid = decoded.header.get("kid")
+    if isinstance(kid, str):
+        if _SQLI_HINTS.search(kid):
+            findings.append(("HIGH",
+                             f"'kid' contains SQL-injection-like characters: {kid!r}"))
+        if _PATH_TRAVERSAL.search(kid):
+            findings.append(("HIGH",
+                             f"'kid' looks like a path-traversal payload: {kid!r}"))
+        if _NULL_BYTE.search(kid):
+            findings.append(("HIGH", "'kid' contains a null byte — file/db lookup trick"))
+        if kid.startswith(("/", "\\")) or kid.startswith("http"):
+            findings.append(("MED", f"'kid' looks like a path or URL: {kid!r}"))
+    elif kid is not None:
+        findings.append(("LOW", f"'kid' is not a string ({type(kid).__name__})"))
+
+    for hdr in ("jku", "x5u"):
+        url = decoded.header.get(hdr)
+        if isinstance(url, str):
+            findings.append(("HIGH",
+                             f"header has '{hdr}={url}' — verify the URL is on an "
+                             f"allowlist (otherwise: trusted-key injection)"))
+
+    if "x5c" in decoded.header:
+        findings.append(("MED", "header has 'x5c' (embedded certificate chain) — "
+                                  "ensure the server pins to a CA / chain it trusts"))
 
     exp = decoded.payload.get("exp")
     if exp is None:
